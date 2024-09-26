@@ -1,1 +1,1 @@
-{"label_types": ["STEM"], "mode": "review", "model": "/home/zvgonzal/FOCUS_project/models", "doc_dir": "/home/zvgonzal/FOCUS_project/APS_docs/Instructor Led Training Content/G&O Plant specific systems content/Ocotillo Power Plant"}
+{"label_types": ["STEM"], "mode": "train", "model": "/home/zvgonzal/FOCUS_project/models/vision_import_models", "doc_dir": ""}

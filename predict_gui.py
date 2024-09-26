@@ -10,8 +10,8 @@ import ast
 
 
 class PredictGui(AnnotationApp):
-  def __init__(self, root: Tk, page_lim: int = 10, label_types: list = ..., json_out: str = "annotations.json") -> None:
-    super().__init__(root, page_lim, label_types, json_out)
+  def __init__(self, root: Tk, page_lim: int = 10, label_types: list = ..., json_out: str = "annotations.json", classifications: dict = {"T_OBJ": ["performance", "cognative"], "E_OBJ": ["performance", "cognative"], "STEM": ["MC", "MA", "TF", "SA", "ES"]}) -> None:
+    super().__init__(root, page_lim, label_types, json_out, classifications)
 
     # extra review specific UI buttons
     self.btn_del_all = tk.Button(self.bottom_frame, text="DEL ALL", command=self.delete_all)
@@ -27,11 +27,21 @@ class PredictGui(AnnotationApp):
   """
   translate a list of ner_tags into 2 parallel dictionary's of words/indexs for each label type
   """
-  def convert_tags_to_annotations(self, ner_tags, words):
+  def convert_tags_to_annotations(self, ner_tags, words, sequences=None, idxs=None, seq_classifications=None):
     annotation_words = {label:[] for label in self.label_types}
     annotation_idxs = {label:[] for label in self.label_types}
+    annotation_classifications = {label:[] for label in self.classifications.keys()}
     
     for label_type in self.label_types:
+      if sequences and seq_classifications and (label_type in sequences.keys()): # instead of generating use what has already been generated
+        annotation_words[label_type] = sequences[label_type]
+        annotation_idxs[label_type] = idxs[label_type]
+        if label_type in seq_classifications.keys():
+          annotation_classifications[label_type] = seq_classifications[label_type]
+        elif label_type in self.classifications.keys():
+          annotation_classifications[label_type] = [self.classifications[label_type][0]*len(sequences[label_type])]
+        continue
+
       for idx, tag in enumerate(ner_tags[label_type]):
         if tag == self.ner_types[0]: # if the tag is null then skip
           continue
@@ -41,11 +51,12 @@ class PredictGui(AnnotationApp):
         if ner_id % 2 or not annotation_idxs[label_type]: # if it is a B- tag or the first I- tag (before a B- tag has appeared)
           annotation_words[label_type].append([])         # then start a new group for that label
           annotation_idxs[label_type].append([])
+          annotation_classifications[label_type].append(self.classifications[label_type][0])
 
         annotation_words[label_type][-1].append(words[idx])
         annotation_idxs[label_type][-1].append(idx)
-    
-    return (annotation_words, annotation_idxs)
+
+    return (annotation_words, annotation_idxs, annotation_classifications)
 
   """
   load images and image words from user provided pdf documents using pymupdf
@@ -60,18 +71,26 @@ class PredictGui(AnnotationApp):
     
     for example in dataset:
       doc_name = example["doc_name"]
+      abs_path = example["abs_path"]
       page_num = example["doc_page"]
       image_path = example["image_path"]
       words = example["words"]
       bboxs = example["bboxs"]
+      context_images = example["context_images"]
+      image_bboxs = example["image_bboxs"]
       ner_tags = example["ner_tags"] # dict where key = label_type, value = ner_tags for given type
+      sequences = example["annotation_words"]
+      seq_labels = example["annotation_classifications"]
+      idxs = example["annotation_idxs"]
 
       self.page_images.append(image_path)
-      self.page_ids.append((doc_name, int(page_num)))
+      self.page_ids.append((doc_name, abs_path, int(page_num)))
       self.words.append(words)
       self.bboxs.append(bboxs)
+      self.context_images.append(context_images)
+      self.image_bboxs.append(image_bboxs)
       self.ner_tags.append(ner_tags)
-      self.annotations.append(self.convert_tags_to_annotations(ner_tags, words))
+      self.annotations.append(self.convert_tags_to_annotations(ner_tags, words, sequences, idxs, seq_labels))
 
     self.export_ready = True
     self.load_page() # load the first page to start editing
@@ -93,6 +112,7 @@ class PredictGui(AnnotationApp):
     self.current_ner_tags = self.ner_tags[self.current_page_index]
     self.current_annotation_words = self.annotations[self.current_page_index][0]
     self.current_annotation_idxs = self.annotations[self.current_page_index][1]
+    self.current_annotation_classifications = self.annotations[self.current_page_index][2]
     self.photo = ImageTk.PhotoImage(image) # save a reference to the photo object
 
     self.left_canvas.config(width=image.width, height=image.height) # change shape to match photo
@@ -108,11 +128,12 @@ class PredictGui(AnnotationApp):
 
     self.save_page()
 
-    doc_names, doc_pages = zip(*self.page_ids)
+    doc_names, abs_paths, doc_pages = zip(*self.page_ids)
     reviewed_dataset = []
-    for doc_name, doc_page, words, bboxs, image_path, ner_tags, annotations in zip(doc_names, doc_pages, self.words, self.bboxs, self.page_images, self.ner_tags, self.annotations):
-      reviewed_dataset.append({"doc_name": doc_name, "doc_page": doc_page, "words": words, "bboxs": bboxs, "image_path":image_path, "ner_tags": ner_tags})
-    
+    for doc_name, abs_path, doc_page, words, bboxs, context_images, image_bboxs, image_path, ner_tags, annotations in zip(doc_names, abs_paths, doc_pages, self.words, self.bboxs, self.context_images, self.image_bboxs, self.page_images, self.ner_tags, self.annotations):
+      entry = {"doc_name": doc_name, "abs_path":abs_path, "doc_page": doc_page, "words": words, "bboxs": bboxs, "context_images":context_images, "image_bboxs":image_bboxs, "image_path":image_path, "ner_tags": ner_tags, "annotation_words":annotations[0], "annotation_idxs":annotations[1], "annotation_classifications":annotations[2]}
+      reviewed_dataset.append(entry)
+
     with open(self.json_file_out, 'w') as datafile:
       json.dump(reviewed_dataset, datafile)
       datafile.close()
@@ -129,6 +150,7 @@ class PredictGui(AnnotationApp):
     self.current_ner_tags = {label_type: [self.ner_types[0] for _ in self.current_page_words] for label_type in self.label_types} 
     self.current_annotation_words = {label: [] for label in self.label_types}
     self.current_annotation_idxs = {label: [] for label in self.label_types} 
+    self.current_annotation_classifications = {label: [] for label in self.classifications.keys()}
 
     self.selected_words = []
     self.selected_idxs = [] 
@@ -144,12 +166,16 @@ class PredictGui(AnnotationApp):
 def init_params():
   parser = argparse.ArgumentParser(prog="review_train.py", description="review and/or train a given model on given data")
   parser.add_argument("label_types")
+  parser.add_argument("secondary_types_json", help="the path to the json file that the secondary types will be extracted from")
   return parser.parse_args()
 
 
 if __name__ == "__main__":
   params = init_params()
   label_types = ast.literal_eval(params.label_types)
+  secondary_types = {"T_OBJ": ["performance", "cognative"], "E_OBJ": ["performance", "cognative"], "STEM": ["MC", "MA", "TF", "SA", "ES"]}
+  with open(params.secondary_types_json) as stypes_json:
+    secondary_types = json.load(stypes_json)
   root = tk.Tk()
-  app = PredictGui(root, label_types=label_types)
+  app = PredictGui(root, label_types=label_types, classifications=secondary_types)
   root.mainloop()

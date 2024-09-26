@@ -6,6 +6,8 @@ import sys
 import ast
 import subprocess
 import os
+from PIL import Image
+import io
 
 
 NER_NULL = 'O'
@@ -51,15 +53,28 @@ def reduce_bbox(bbox, width, height):
 
 
 # return the data necessary for information extraction from the given page
-def get_page_data(page):
+def get_page_data(page, params, doc_name, page_num):
   context_words = page.get_text("words")
   context_text = [word[4] for word in context_words]
   context_bboxs = [(word[0], word[1], word[2], word[3]) for word in context_words]
   width = page.rect.x1 - page.rect.x0
   height = page.rect.y1 - page.rect.y0
   context_bboxs = [reduce_bbox(bbox, width, height) for bbox in context_bboxs]
+  page_images = page.get_image_info(xrefs=True)
+  context_images = []
+  image_bboxs = []
+  for j, image in enumerate(page_images):
+    xref = image["xref"]
+    base_image = doc.extract_image(xref)
+    image_bytes = base_image["image"]
+    image_ext = base_image["ext"]
+    pil_image = Image.open(io.BytesIO(image_bytes))
+    image_path = f"{params.temp_dir}{doc_name}_page_{page_num}_image_{j}.{image_ext}"
+    pil_image.save(image_path)
+    context_images.append(image_path)
+    image_bboxs.append(image["bbox"])
 
-  return context_text, context_bboxs, width, height
+  return context_text, context_bboxs, context_images, image_bboxs, width, height
 
 
 # generates image for use in prediction and review (stored in tempdir)
@@ -122,18 +137,22 @@ if __name__ == "__main__":
 
   words_list = []
   bboxs_list = []
+  context_image_list = []
+  image_bbox_list = []
   width_list = []
   height_list = []
   ner_tag_list = []
   for page_num in range(start_page, end_page):
-    page_words, page_bboxs, width, height = get_page_data(doc[page_num])
+    page_words, page_bboxs, context_images, image_bboxs, width, height = get_page_data(doc[page_num], params, doc_path.name, page_num)
     words_list.append(page_words)
     bboxs_list.append(page_bboxs)
+    context_image_list.append(context_images)
+    image_bbox_list.append(image_bboxs)
     width_list.append(width)
     height_list.append(height)
     ner_tag_list.append(init_ner_tags(page_words, label_types))
   
-  new_data = [{"doc_name":doc_name, "doc_page":doc_page, "image_path":image_path, "words":words, "bboxs":bboxs, "ner_tags":ner_tags, "page_width":width, "page_height":height} for doc_name, doc_page, image_path, words, bboxs, ner_tags, width, height in zip([doc_path.name for _ in image_paths], range(start_page, end_page), image_paths, words_list, bboxs_list, ner_tag_list, width_list, height_list)]
+  new_data = [{"doc_name":doc_name, "abs_path":abs_path, "doc_page":doc_page, "image_path":image_path, "words":words, "bboxs":bboxs, "context_images":context_images, "image_bboxs":image_bboxs, "ner_tags":ner_tags, "page_width":width, "page_height":height} for doc_name, abs_path, doc_page, image_path, words, bboxs, context_images, image_bboxs, ner_tags, width, height in zip([doc_path.name for _ in image_paths], [doc_path.resolve().__str__() for _ in image_paths], range(start_page, end_page), image_paths, words_list, bboxs_list, context_image_list, image_bbox_list, ner_tag_list, width_list, height_list)]
   existing_data.extend(new_data)
   
   with open(params.json_file, 'w') as json_file:

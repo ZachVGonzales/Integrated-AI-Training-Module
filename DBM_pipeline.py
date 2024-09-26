@@ -26,11 +26,8 @@ def init_params():
   parser = argparse.ArgumentParser(prog='DBM_pipeline.py',
                                    description='takes an input file and outputs a stream of text containting all the relevant category groups')
   parser.add_argument('-v', '--verbose', action='store_true', required=False)
-  parser.add_argument('-c', '--clean', action='store_true', required=False)
   parser.add_argument('-p', '--page_range', action='store_true', required=False)
-  parser.add_argument('-r', '--revision', action='store_true', required=False)
   parser.add_argument('-o', '--ocr', action='store_true', required=False)
-  parser.add_argument('-t', '--train', action='store_true', required=False)
   return parser.parse_args()
 
 
@@ -90,77 +87,6 @@ def init_temp_data(pdf_docx_files, params, label_types):
 
 
 """
-" description: use the information stored within the given project datafile to incrementally review and train the AI
-" parameters:
-" - 
-"""
-def incremental(extracted_data, label_types, model_dir):
-
-  gui_process = subprocess.Popen([sys.executable, 'incremental_gui.py', str(label_types)], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-  AI_process = subprocess.Popen([sys.executable, 'predict_train.py', model_dir, str(label_types), str(MINIBATCH_SIZE)], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-
-  print(f"total num pages {len(extracted_data)}")
-  for super_batch in batch_iterator(extracted_data, SUPERBATCH_SIZE):
-    # get info from gui on if AI predictions shall be made on the batch
-    predict = gui_process.stdout.readline().decode().strip()
-    predict = bool(predict)
-
-    # dump the super_batch data to the temporary file
-    with open(INCREMENTAL_DATA, 'w') as temp_df:
-      json.dump(super_batch, temp_df, indent=2)
-      temp_df.close()
-
-    # if predictions shall be made then output request to the AI process
-    # otherwise just let the gui process know that the data is available
-    # for review
-    if predict:
-      AI_process.stdin.write("predict\n".encode())
-      AI_process.stdin.write(f"{INCREMENTAL_DATA}\n".encode())
-      AI_process.stdin.flush()
-    
-      # wait for predictions to be writenback then make these available to gui process
-      done = AI_process.stdout.readline().decode().strip()
-      if done == "done":
-        print(done)
-        gui_process.stdin.write(f"{INCREMENTAL_DATA}\n".encode())
-        gui_process.stdin.flush()
-      else:
-        break
-    else:
-      gui_process.stdin.write(f"{INCREMENTAL_DATA}\n".encode())
-      gui_process.stdin.flush()
-    
-    # wait for gui process to review the predictions made by the AI process
-    train = gui_process.stdout.readline().decode().strip()
-    train = bool(train)
-
-    # now that batch is reviewed add it to the training corpus
-    with open(REVIEWED_DATA, 'r+') as training_df:
-      all_training_data = json.load(training_df)
-      reviewed_data = []
-      with open(INCREMENTAL_DATA, 'r') as temp_df:
-        reviewed_data = json.load(temp_df)
-        temp_df.close()
-      all_training_data.extend(reviewed_data)
-      json.dump(all_training_data, training_df)
-    
-    # now check if gui process requested training, if yes then train on whole training corpus
-    if train:
-      AI_process.stdin.write("train\n".encode())
-      AI_process.stdin.write(f"{REVIEWED_DATA}\n".encode())
-      AI_process.stdin.flush()
-
-      # wait for the training of the model to finish
-      done = AI_process.stdout.readline().decode().strip()
-      if done != "done":
-        break
-  
-  # once done with all batches then quit
-  print("done processing projects extracted data incrimentally")
-  quit()
-
-
-"""
 " DESCRIPTION: prefrom predictions on the entire existing dataset and allow user review
 """
 def predict_all(label_types, model_dir):
@@ -179,7 +105,7 @@ def predict_all(label_types, model_dir):
 
   # now that predictions are done let gui process know they are available 
   gui_process.stdin.write(f"{UNREVIEWED_DATA}\n".encode())
-  gui_process.stdin.write(f"{REVIEWED_DATA}\n".encode())
+  gui_process.stdin.write(f"{UNREVIEWED_DATA}\n".encode())
   gui_process.stdin.flush()
 
   # wait for user to review predictions and GUI process will automatically write results to reviewed datafile
@@ -198,7 +124,7 @@ def review_all(label_types):
   gui_process = subprocess.Popen([sys.executable, 'review_gui.py', str(label_types)], stdin=subprocess.PIPE, stdout=subprocess.PIPE) # TODO: change this to specific predict gui process
 
   # have user review all data in the unreviewed datafile
-  gui_process.stdin.write(f"{UNREVIEWED_DATA}\n".encode())
+  gui_process.stdin.write(f"{REVIEWED_DATA}\n".encode()) # TODO: change this back to UNREVIEWED_DATA
   gui_process.stdin.write(f"{REVIEWED_DATA}\n".encode())
   gui_process.stdin.flush()
 
@@ -260,14 +186,7 @@ if __name__ == "__main__":
   # extract info from each doc in provided directory
   init_temp_data(pdf_docx_files, params, label_types)
 
-  # now that all the required info is gathered from the documents review a batch and train (mandatory for 1st optional for next)
-  with open(UNREVIEWED_DATA, 'r') as datafile:
-    extracted_data = json.load(datafile)
-    datafile.close()
-
-  if mode == "incremental":
-    incremental(extracted_data, label_types, model_dir)
-  elif mode == "predict":
+  if mode == "predict":
     predict_all(label_types, model_dir)
   elif mode == "review":
     review_all(label_types)

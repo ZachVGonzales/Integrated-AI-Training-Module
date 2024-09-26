@@ -21,7 +21,7 @@ class AnnotationApp():
   - page_lim: the limit on the number of pages that shall be extracted from a given document,
   -           defaults to 10
   """
-  def __init__(self, root: tk.Tk, page_lim: int = 10, label_types: list = ["Default"], json_out: str = "annotations.json") -> None:
+  def __init__(self, root: tk.Tk, page_lim: int = 10, label_types: list = ["Default"], json_out: str = "annotations.json", classifications: dict = {"T_OBJ": ["performance", "cognative"], "E_OBJ": ["performance", "cognative"], "STEM": ["MC", "TF", "SA", "ES"]}) -> None:
     self.root = root
     self.json_out = json_out
     self.page_lim = page_lim
@@ -29,6 +29,7 @@ class AnnotationApp():
     
     # create a list of label types and NER types given the input list of labels
     self.label_types = label_types 
+    self.classifications = classifications
     self.ner_types = ["O"]
     for label in label_types:
       self.ner_types.append(f"B-{label}")
@@ -49,6 +50,8 @@ class AnnotationApp():
     self.page_ids = [] # list of tuples, NOTE: must be seperated into diferent colums before storing
     self.words = [] # list of lists, each is a list of the words on a given page (just the text)
     self.bboxs = [] # list of lists, each is a list of the bounding boxes on a given page
+    self.context_images = []
+    self.image_bboxs = []
     self.ner_tags = [] # list of dicts, each as long as the context words 
 
     # info pertaining to the current page being examined in the app
@@ -58,6 +61,7 @@ class AnnotationApp():
     self.current_ner_tags = [] # list of dicts of lists of NER tags (one for each word)
     self.current_annotation_words = {} # dict: key = "label type", value = [words0, words1, ...] where wordsN is a list of words for each annotation
     self.current_annotation_idxs = {} # dict: key = "label type", value = [idxs0, idxs1, ...] 
+    self.current_annotation_classifications = None
     self.photo = None # a reference to the current photo being displayed on the canvas (so as not to be deleted by garbage collection)
 
     # info pertaining to the current annotation being made
@@ -71,8 +75,8 @@ class AnnotationApp():
     self.top_frame = tk.Frame(root)
     self.top_frame.pack(fill='both', expand=True)
 
-    self.left_canvas = tk.Canvas(self.top_frame, bg="white", width=150, height=250)
-    self.left_canvas.pack(side='left', fill='both', expand=True)
+    self.left_canvas = tk.Canvas(self.top_frame, bg="white", width=50, height=250)
+    self.left_canvas.pack(side='left', fill='both', expand=False)
 
     self.right_canvas = tk.Canvas(self.top_frame, bg="lightgrey", width=150, height=250)
     self.right_canvas.pack(side='right', fill='both', expand=True)
@@ -142,7 +146,7 @@ class AnnotationApp():
           page = doc[i]
           page_words = page.get_text("words")
           self.page_images.append(page.get_pixmap())
-          self.annotations.append(({label: [] for label in self.label_types}, {label: [] for label in self.label_types}))
+          self.annotations.append(({label: [] for label in self.label_types}, {label: [] for label in self.label_types}, {label: [] for label in self.classifications.keys()}))
           self.page_ids.append((os.path.basename(path), i))
           self.words.append([word[4] for word in page_words])
           self.bboxs.append([(word[0], word[1], word[2], word[3]) for word in page_words])
@@ -167,6 +171,7 @@ class AnnotationApp():
     self.current_ner_tags = self.ner_tags[self.current_page_index]
     self.current_annotation_words = self.annotations[self.current_page_index][0]
     self.current_annotation_idxs = self.annotations[self.current_page_index][1]
+    self.current_annotation_classifications = self.annotations[self.current_page_index][2]
     self.photo = ImageTk.PhotoImage(image) # save a reference to the photo object
 
     self.left_canvas.config(width=image.width, height=image.height) # change shape to match photo
@@ -180,7 +185,7 @@ class AnnotationApp():
     self.words[self.current_page_index] = self.current_page_words
     self.bboxs[self.current_page_index] = self.current_page_bboxs
     self.ner_tags[self.current_page_index] = self.current_ner_tags
-    self.annotations[self.current_page_index] = (self.current_annotation_words, self.current_annotation_idxs)
+    self.annotations[self.current_page_index] = (self.current_annotation_words, self.current_annotation_idxs, self.current_annotation_classifications)
 
   """
   go to the next page in the page list
@@ -217,6 +222,8 @@ class AnnotationApp():
     del self.page_ids[self.current_page_index]
     del self.words[self.current_page_index]
     del self.bboxs[self.current_page_index]
+    del self.context_images[self.current_page_index]
+    del self.image_bboxs[self.current_page_index]
     del self.ner_tags[self.current_page_index]
     del self.annotations[self.current_page_index]
     
@@ -350,6 +357,8 @@ class AnnotationApp():
     else:
       self.current_annotation_words[self.selected_label.get()].append(self.selected_words)
       self.current_annotation_idxs[self.selected_label.get()].append(self.selected_idxs)
+      if selected_label in self.classifications.keys():
+        self.current_annotation_classifications[selected_label].append(self.classifications[selected_label][0])
     
     #print(self.current_annotation_words)
     #print(self.current_annotation_idxs)
@@ -441,10 +450,19 @@ class AnnotationApp():
         delete_button = tk.Button(annotation_frame, text="Delete", command=lambda idx=i, label=label: (self.select_annotation(idx, label), self.delete_annotation()))
         delete_button.pack(side="right", padx=5)
 
+        if label in self.classifications.keys():
+          selected_class = tk.StringVar(annotation_frame, self.current_annotation_classifications[label][i])
+          class_menu = tk.OptionMenu(annotation_frame, selected_class, *self.classifications[label], command=lambda selection, idx=i, label=label, string_var=selected_class: self.update_selected_class(string_var, idx, label, selection))
+          class_menu.pack(side='right', padx=5)
+
     # Update canvas scroll region
     text_frame.update_idletasks()
     self.right_canvas.config(scrollregion=self.right_canvas.bbox("all"))
   
+  def update_selected_class(self, string_var: tk.StringVar, idx: int, label: str, selection: str):
+    string_var.set(selection)
+    self.current_annotation_classifications[label][idx] = selection
+
   """
   display the bounding boxes of the currently selected annotation
   """
@@ -580,6 +598,7 @@ class ReviewApp(AnnotationApp):
     self.current_ner_tags = self.ner_tags[self.current_page_index]
     self.current_annotation_words = self.annotations[self.current_page_index][0]
     self.current_annotation_idxs = self.annotations[self.current_page_index][1]
+    self.current_annotation_classifications = self.annotations[self.current_page_index][2]
     self.photo = ImageTk.PhotoImage(image) # save a reference to the photo object
 
     self.left_canvas.config(width=image.width, height=image.height) # change shape to match photo

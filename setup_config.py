@@ -24,7 +24,7 @@ class StartupWindow():
     # selection for mode of program:
     self.mode_label = tk.Label(root, text="select mode:")
     self.mode_label.pack(pady=5)
-    self.options = ["incremental", "predict", "review", "train"]
+    self.options = ["predict", "review", "train"]
     self.selected_option = tk.StringVar()
     self.selected_option.set(self.options[0])
 
