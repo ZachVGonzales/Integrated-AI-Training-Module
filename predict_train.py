@@ -1,4 +1,4 @@
-from custom_models import MultimodalLMV3ForTokenClass, VisionSequenceClassifiers
+from custom_models import MultimodalLMV3ForTokenClass
 import argparse
 import json
 import sys

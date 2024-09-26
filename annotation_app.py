@@ -1,11 +1,10 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog
 from PIL import Image, ImageTk
 import json
 import os
 import sys
 import fitz # only used in AnnotationApp (Maybe seperate into own files)
-import ast # only used in ReviewApp
 import queue
 import threading
 

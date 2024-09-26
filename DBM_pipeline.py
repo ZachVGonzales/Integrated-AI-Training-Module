@@ -2,7 +2,6 @@ import argparse
 import sys
 import os
 import subprocess
-import multiprocessing
 from pathlib import Path
 import json
 
